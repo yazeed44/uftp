@@ -42,17 +42,7 @@ int create_socket(struct addrinfo *servinfo) {
     return sockfd;
 }
 
-void print_response(int sockfd, struct addrinfo *servinfo){
-    char buf[BUFFLEN];
-    memset(buf, 0, BUFFLEN);
-    int len;
-    while (recvfrom(sockfd, buf, BUFFLEN-1, 0,servinfo->ai_addr, &len) > 0){
-        buf[BUFFLEN - 1] = '\0';
-        printf("%s", buf);
-        fflush(stdout);
-        memset(buf, 0, BUFFLEN);
-    }
-}
+
 
 int send_to_server(int sockfd, char buf[], size_t buflen, struct addrinfo *servinfo){
     int numbytes;
@@ -61,6 +51,28 @@ int send_to_server(int sockfd, char buf[], size_t buflen, struct addrinfo *servi
         perror("talker: sendto");
     }
     return numbytes;
+}
+
+int receive_msg(int sockfd, char buf[], size_t buflen,struct addrinfo *servinfo){
+    memset(buf, 0, buflen);
+    int len;
+    int numbytes = recvfrom(sockfd, buf, buflen, 0,servinfo -> ai_addr, &len);
+    if(numbytes == -1){
+        perror("recvfrom");
+        exit(1);
+    }
+    buf[numbytes] = '\0';
+    return numbytes;
+}
+
+void print_response(int sockfd, struct addrinfo *servinfo){
+    char buf[BUFFLEN];
+    int len;
+    while (receive_msg(sockfd, buf, BUFFLEN-1,servinfo) > 0){
+        buf[BUFFLEN - 1] = '\0';
+        printf("%s", buf);
+        fflush(stdout);
+    }
 }
 
 int send_transmission_done_packet(int sockfd, struct addrinfo *servinfo){
@@ -84,11 +96,18 @@ void send_file(int sockfd, FILE *src_file, struct addrinfo *servinfo){
     
     fclose(src_file);
 }
-void handle_put_command(char cmd[], int sockfd, struct addrinfo *servinfo){
+
+char* get_filename(char cmd[]){
+    //Extract file name from command
     char *filename = malloc(BUFFLEN);
     strcpy(filename, cmd);
     filename = strtok(filename, " ");
     filename = strtok(NULL, " ");
+    return filename;
+}
+
+void handle_put_command(char cmd[], int sockfd, struct addrinfo *servinfo){
+    char *filename = get_filename(cmd);
     FILE *file_destination =  fopen(filename, "rb");
     if(file_destination == NULL)
     {
@@ -101,6 +120,34 @@ void handle_put_command(char cmd[], int sockfd, struct addrinfo *servinfo){
     }
 }
 
+void receive_file(int sockfd, FILE *dst_file , struct addrinfo *servinfo){
+    char filebuf[BUFFLEN]; 
+    int numbytes;
+    int totalReceived = 0;
+    while ((numbytes = receive_msg(sockfd, filebuf, BUFFLEN, servinfo)) > 0){
+        fwrite(filebuf, numbytes, 1, dst_file);
+        totalReceived += numbytes;
+        //Will exit when recives a packet with buffer length = 0, which is our transmission done packet (send_transmission_done_packet)
+    }
+    printf("Total received %i bytes\n", totalReceived); // TODO delete this
+    fclose(dst_file);
+}
+
+void handle_get_command(char cmd[], int sockfd, struct addrinfo *servinfo){
+    char *filename = get_filename(cmd);
+    FILE *file_destination =  fopen(filename, "wb");
+    if(file_destination == NULL)
+    {
+        printf("ERROR - Failed to open file for writing\n");
+    }
+
+    else {
+        send_to_server(sockfd, cmd, strlen(cmd), servinfo);
+        receive_file(sockfd, file_destination, servinfo);
+    }   
+    
+
+}
 
 int send_cmd(int sockfd, struct addrinfo *servinfo) {
     int numbytes;
@@ -123,6 +170,9 @@ int send_cmd(int sockfd, struct addrinfo *servinfo) {
     else if (strstr(cmd, "put") != NULL) {
         handle_put_command(cmd, sockfd, servinfo);
     }
+
+    else if (strstr(cmd, "get") != NULL)
+        handle_get_command(cmd, sockfd, servinfo);
 
     else {
         // Unknown command

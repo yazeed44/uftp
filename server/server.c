@@ -115,21 +115,35 @@ void handle_ls_cmd(int sockfd, struct sockaddr_storage client_addr){
     pclose(fp);
 }
 
+void send_file(int sockfd, FILE *src_file, struct sockaddr_storage client_addr){
+    char filebuf[BUFFLEN];
+    memset(filebuf, 0, BUFFLEN);
+    int numbytes;
+    int totalsent = 0;
+    while ((numbytes = (fread(filebuf, 1, BUFFLEN,  src_file))) > 0){
+        int sendbytes = send_to_client(sockfd, filebuf, numbytes, client_addr);
+        printf("Sent %i bytes \n", sendbytes);
+        memset(filebuf, 0, BUFFLEN);
+        totalsent += sendbytes;
+        }
+    send_transmission_done_packet(sockfd, client_addr);
+    printf("Total bytes are %i bytes\n", totalsent);
+    
+    fclose(src_file);
+}
+
 void handle_get_cmd(char buf[], int sockfd, struct sockaddr_storage client_addr) {
     char *filename = strtok(buf, " ");
     filename = strtok(NULL, " ");
-    
     FILE* fp = fopen(filename, "r");
     if (fp == NULL){
         char msg[] = "File open failed!\n";
         send_to_client(sockfd, msg, strlen(msg), client_addr);
+        send_transmission_done_packet(sockfd, client_addr);
     }
 
     else {
-        //The file exists
-        //TODO
-        send_transmission_done_packet(sockfd, client_addr);
-        fclose(fp);
+        send_file(sockfd, fp, client_addr);
     }
 }
 
@@ -160,7 +174,7 @@ void handle_put_cmd(char buf[], int sockfd, struct sockaddr_storage *client_addr
     else
     {
         receive_file(sockfd, file_destination, client_addr);
-        char *msg = "The file has been received. Although a verifying method has not been implemented yet (WIP) \n";
+        char *msg = "The file has been received. Although a verifying method has not been implemented yet (WIP) \n"; // TODO change this
         send_to_client(sockfd, msg, strlen(msg), *client_addr);
         send_transmission_done_packet(sockfd, *client_addr);
     } 
