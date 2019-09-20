@@ -42,12 +42,9 @@ int create_socket(struct addrinfo *servinfo) {
     return sockfd;
 }
 
-
-
 int send_to_server(int sockfd, char buf[], size_t buflen, struct addrinfo *servinfo){
     int numbytes;
     if ((numbytes = sendto(sockfd, buf, buflen, 0, servinfo->ai_addr, servinfo->ai_addrlen)) < 0){
-        
         perror("talker: sendto");
     }
     return numbytes;
@@ -66,6 +63,7 @@ int receive_msg(int sockfd, char buf[], size_t buflen,struct addrinfo *servinfo)
 }
 
 void print_response(int sockfd, struct addrinfo *servinfo){
+    //This function will output whatever it receives from the server on the screen until an empty packet has been received (send_transmission_done_packet)
     char buf[BUFFLEN];
     int len;
     while (receive_msg(sockfd, buf, BUFFLEN-1,servinfo) > 0){
@@ -93,7 +91,6 @@ void send_file(int sockfd, FILE *src_file, struct addrinfo *servinfo){
         }
     send_transmission_done_packet(sockfd, servinfo);
     printf("Sent a %i bytes\n", totalsent);
-    
     fclose(src_file);
 }
 
@@ -114,7 +111,7 @@ void handle_put_command(char cmd[], int sockfd, struct addrinfo *servinfo){
         printf("ERROR - Failed to open file for sending\n");
     }   
     else {
-        send_to_server(sockfd, cmd, strlen(cmd), servinfo); // Send the command and its arguments
+        send_to_server(sockfd, cmd, strlen(cmd), servinfo); // Send the command and its arguments so the server can expect the file
         send_file(sockfd, file_destination, servinfo);
         print_response(sockfd, servinfo);
     }
@@ -144,11 +141,8 @@ void handle_get_command(char cmd[], int sockfd, struct addrinfo *servinfo){
     else {
         send_to_server(sockfd, cmd, strlen(cmd), servinfo);
         receive_file(sockfd, file_destination, servinfo);
-    }   
-    
-
+    }  
 }
-
 int send_cmd(int sockfd, struct addrinfo *servinfo) {
     int numbytes;
     char cmd[BUFFLEN];
@@ -181,8 +175,6 @@ int send_cmd(int sockfd, struct addrinfo *servinfo) {
     }
     return numbytes;
 }
-
-
 void handle_communications(int sockfd, struct addrinfo *servinfo){
     int numbytes;
     while (1) {

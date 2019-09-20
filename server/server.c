@@ -8,15 +8,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
-#define PORT "5454"
 #define BUFFLEN 14000 //Temporary
-#define STANDBY_MODE 0
-#define PUT_MODE 1
-#define GET_MODE 2
-//TODO make port number as an argument
-int mode = STANDBY_MODE; // When the server is sending or reciving files, It will stop reciving other commands. 
-// This variable will be used to check which mode is the server on
-//TODO send a message when the file has been received successfully
 struct addrinfo init_hints() {
     struct addrinfo hints;
     memset(&hints, 0, sizeof(hints));
@@ -26,10 +18,20 @@ struct addrinfo init_hints() {
     return hints;
 }
 
-void init_servinfo( struct addrinfo **servinfo) {
+char* init_port(int argc, char* argv[]){
+    if (argc != 2) {
+        fprintf(stderr, "usage: ./server port\n");
+        exit(1);
+    }
+    else {
+        return argv[1];
+    }
+}
+
+void init_servinfo( struct addrinfo **servinfo, char *port) {
     struct addrinfo hints = init_hints();
     int rv;
-    if (rv = (getaddrinfo(NULL, PORT, &hints, servinfo)) != 0){
+    if (rv = (getaddrinfo(NULL, port, &hints, servinfo)) != 0){
         fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
         exit(1);
     }
@@ -178,9 +180,6 @@ void handle_put_cmd(char buf[], int sockfd, struct sockaddr_storage *client_addr
         send_to_client(sockfd, msg, strlen(msg), *client_addr);
         send_transmission_done_packet(sockfd, *client_addr);
     } 
-        
-
-    
 }
 
 void handle_delete_cmd(char buf[], int sockfd, struct sockaddr_storage client_addr){
@@ -228,17 +227,16 @@ void handle_communication(int sockfd) {
     int numbytes;
     struct sockaddr_storage client_addr;
     char buf[BUFFLEN];
-    memset(buf, 0, BUFFLEN);
     socklen_t addr_len = sizeof client_addr;
-
     while (1) {
         numbytes = receive_msg(sockfd, buf, sizeof(buf),&client_addr);
         handle_commands(buf, sockfd, client_addr);   
     }
 }
-int main(void) {
+int main(int argc, char* argv[]) {
+    char *port = init_port(argc, argv);
     struct addrinfo *servinfo;
-    init_servinfo(&servinfo);
+    init_servinfo(&servinfo, port);
     int sockfd = socket_bind(servinfo);
     freeaddrinfo(servinfo);
     handle_communication(sockfd);
