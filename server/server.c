@@ -9,7 +9,7 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 #define PORT "5454"
-#define BUFFLEN 1024 //Temporary
+#define BUFFLEN 14000 //Temporary
 #define STANDBY_MODE 0
 #define PUT_MODE 1
 #define GET_MODE 2
@@ -94,7 +94,7 @@ int send_to_client(int sockfd, char *buf, size_t buflen,struct sockaddr_storage 
 
 void send_transmission_done_packet(int sockfd, struct sockaddr_storage clientaddr){
     char buf[BUFFLEN];
-    memset(buf, 0, BUFFLEN); // Send a packet that tells the server that the file transmission is done
+    memset(buf, 0, strlen(buf)); // Send a packet that tells the client that the transmission is done and he can exit recvfrom
     send_to_client(sockfd, buf, strlen(buf), clientaddr);
 }
 void handle_ls_cmd(int sockfd, struct sockaddr_storage client_addr){
@@ -133,26 +133,39 @@ void handle_get_cmd(char buf[], int sockfd, struct sockaddr_storage client_addr)
     }
 }
 
+void receive_file(int sockfd, FILE *dst_file , struct sockaddr_storage *client_addr){
+    char filebuf[BUFFLEN]; 
+    int numbytes;
+    int totalReceived = 0;
+    while ((numbytes = receive_msg(sockfd, filebuf, BUFFLEN, client_addr)) > 0){
+        fwrite(filebuf, numbytes, 1, dst_file);
+        totalReceived += numbytes;
+        //Will exit when recives a packet with buffer length = 0, which is our transmission done packet (send_transmission_done_packet)
+    }
+    printf("Total received %i bytes\n", totalReceived); // TODO delete this
+    fclose(dst_file);
+}
+
 void handle_put_cmd(char buf[], int sockfd, struct sockaddr_storage *client_addr){ 
     char *filename = strtok(buf, " ");
     filename = strtok(NULL, " ");
-    FILE *file_destination =  fopen(filename, "w");
-    if(file_destination == NULL)
-    {
+    FILE *file_destination =  fopen(filename, "wb");
+    if(file_destination == NULL) {
         perror("ERROR - Failed to open file for writing\n");
+        char *msg = "Failed to open the file\n";
+        send_to_client(sockfd, msg, strlen(msg), *client_addr);
+        send_transmission_done_packet(sockfd, *client_addr);
     }
+        
+    else
+    {
+        receive_file(sockfd, file_destination, client_addr);
+        char *msg = "The file has been received. Although a verifying method has not been implemented yet (WIP) \n";
+        send_to_client(sockfd, msg, strlen(msg), *client_addr);
+        send_transmission_done_packet(sockfd, *client_addr);
+    } 
+        
 
-    else {
-        char filebuf[BUFFLEN]; 
-        int numbytes;
-        int totalReceived = 0;
-        while ((numbytes = receive_msg(sockfd, filebuf, BUFFLEN, client_addr)) > 0){
-            fwrite(filebuf, numbytes, 1, file_destination);
-            totalReceived += numbytes;
-        }
-        printf("Total received %i bytes\n", totalReceived);
-        fclose(file_destination);
-    }
     
 }
 

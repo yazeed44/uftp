@@ -8,7 +8,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
-#define BUFFLEN 1024
+#define BUFFLEN 14000 //TODO look for optimal buffer length
 //TODO Add support for DNS argument
 void check_arguments(int argc){
     if (argc != 3) {
@@ -83,7 +83,6 @@ void send_file(int sockfd, FILE *src_file, struct addrinfo *servinfo){
     printf("Sent a %i bytes\n", totalsent);
     
     fclose(src_file);
-    
 }
 void handle_put_command(char cmd[], int sockfd, struct addrinfo *servinfo){
     char *filename = malloc(BUFFLEN);
@@ -98,6 +97,7 @@ void handle_put_command(char cmd[], int sockfd, struct addrinfo *servinfo){
     else {
         send_to_server(sockfd, cmd, strlen(cmd), servinfo); // Send the command and its arguments
         send_file(sockfd, file_destination, servinfo);
+        print_response(sockfd, servinfo);
     }
 }
 
