@@ -13,10 +13,10 @@
 #define STANDBY_MODE 0
 #define PUT_MODE 1
 #define GET_MODE 2
-
+//TODO make port number as an argument
 int mode = STANDBY_MODE; // When the server is sending or reciving files, It will stop reciving other commands. 
 // This variable will be used to check which mode is the server on
-
+//TODO send a message when the file has been received successfully
 struct addrinfo init_hints() {
     struct addrinfo hints;
     memset(&hints, 0, sizeof(hints));
@@ -94,7 +94,7 @@ int send_to_client(int sockfd, char *buf, size_t buflen,struct sockaddr_storage 
 
 void send_transmission_done_packet(int sockfd, struct sockaddr_storage clientaddr){
     char buf[BUFFLEN];
-    memset(buf, 0,strlen(buf)); // Send a packet that tells the server that the file transmission is done
+    memset(buf, 0, BUFFLEN); // Send a packet that tells the server that the file transmission is done
     send_to_client(sockfd, buf, strlen(buf), clientaddr);
 }
 void handle_ls_cmd(int sockfd, struct sockaddr_storage client_addr){
@@ -118,6 +118,7 @@ void handle_ls_cmd(int sockfd, struct sockaddr_storage client_addr){
 void handle_get_cmd(char buf[], int sockfd, struct sockaddr_storage client_addr) {
     char *filename = strtok(buf, " ");
     filename = strtok(NULL, " ");
+    
     FILE* fp = fopen(filename, "r");
     if (fp == NULL){
         char msg[] = "File open failed!\n";
@@ -135,30 +136,24 @@ void handle_get_cmd(char buf[], int sockfd, struct sockaddr_storage client_addr)
 void handle_put_cmd(char buf[], int sockfd, struct sockaddr_storage *client_addr){ 
     char *filename = strtok(buf, " ");
     filename = strtok(NULL, " ");
-    FILE *file_destination =  fopen(filename, "wb");
+    FILE *file_destination =  fopen(filename, "w");
     if(file_destination == NULL)
     {
-        printf("ERROR - Failed to open file for writing\n");
+        perror("ERROR - Failed to open file for writing\n");
     }
 
     else {
-        memset(buf, 0, BUFFLEN);
-        receive_msg(sockfd, buf, BUFFLEN - 1, client_addr);
-        int totalbytes = atoi(buf); // The total number of bytes for this file
-        while (totalbytes > 0) {
-            memset(buf, 0, BUFFLEN);
-            int numbytes = receive_msg(sockfd, buf, BUFFLEN - 1, client_addr);
-            int writebytes = fwrite(buf, strlen(buf), 1, file_destination);
-            if (writebytes != numbytes){
-                //fprintf(stderr, "%s\n", explain_fwrite(buf, strlen(buf), 1, file_destination));
-                //TODO handle exception
-            }
-            totalbytes -= numbytes;
+        char filebuf[BUFFLEN]; 
+        int numbytes;
+        int totalReceived = 0;
+        while ((numbytes = receive_msg(sockfd, filebuf, BUFFLEN, client_addr)) > 0){
+            fwrite(filebuf, numbytes, 1, file_destination);
+            totalReceived += numbytes;
         }
-        printf("Got out of recvfrom\n");
-        //printf("Sent %i packets \n", count);
+        printf("Total received %i bytes\n", totalReceived);
         fclose(file_destination);
     }
+    
 }
 
 void handle_delete_cmd(char buf[], int sockfd, struct sockaddr_storage client_addr){
@@ -196,6 +191,7 @@ void handle_commands(char buf[], int sockfd, struct sockaddr_storage client_addr
 
     else {
         //The command was not understood
+        
         strcat(buf, ": This command was not understood\n");
         send_to_client(sockfd, buf, strlen(buf),client_addr);
         send_transmission_done_packet(sockfd, client_addr);
