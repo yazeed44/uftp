@@ -8,8 +8,8 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
-#define BUFFLEN 14000 //TODO look for optimal buffer length
-//TODO Add support for DNS argument
+#define BUFFLEN 512 //TODO look for optimal buffer length
+//TODO Test support for DNS argument
 void check_arguments(int argc){
     if (argc != 3) {
         fprintf(stderr, "usage: ./client server_ip port\n");
@@ -36,26 +36,32 @@ void init_servinfo( struct addrinfo **servinfo, char* argv[]) {
 int create_socket(struct addrinfo *servinfo) {
     int sockfd = socket(servinfo->ai_family, servinfo->ai_socktype, servinfo->ai_protocol);
     if (sockfd == -1) {
-            perror("talker: socket");
+            perror("create_socket: socket");
             exit(1);
     }
+    struct timeval tv;
+    tv.tv_sec = 1; // Set timeout to be 1 seconds
+    tv.tv_usec = 0;
+    if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO,&tv,sizeof(tv)) < 0) 
+        perror("create_socket: setsockopt");
+
     return sockfd;
 }
 
 int send_to_server(int sockfd, char buf[], size_t buflen, struct addrinfo *servinfo){
     int numbytes;
     if ((numbytes = sendto(sockfd, buf, buflen, 0, servinfo->ai_addr, servinfo->ai_addrlen)) < 0){
-        perror("talker: sendto");
+        perror("send_to_server: sendto");
     }
     return numbytes;
 }
 
 int receive_msg(int sockfd, char buf[], size_t buflen,struct addrinfo *servinfo){
     memset(buf, 0, buflen);
-    int len;
+    unsigned int len;
     int numbytes = recvfrom(sockfd, buf, buflen, 0,servinfo -> ai_addr, &len);
     if(numbytes == -1){
-        perror("recvfrom");
+        perror("receive_msg: recvfrom");
         exit(1);
     }
     buf[numbytes] = '\0';
@@ -79,18 +85,51 @@ int send_transmission_done_packet(int sockfd, struct addrinfo *servinfo){
     return send_to_server(sockfd, buf, strlen(buf), servinfo);
 }
 
+int assure_arrival_of_packet(int sockfd, unsigned int numPacket,char filebuf[], size_t buflen,struct addrinfo *servinfo){
+    int sentbytes = 0;
+    char ackBuf[BUFFLEN];
+    while (1) {
+        int curBytes = send_to_server(sockfd, filebuf, buflen, servinfo); // Send the file chunk packet
+        sentbytes += curBytes;
+        printf("assure_arrival_of_packet: Sent %u bytes. Waiting for ack now\n", curBytes);
+        //Wait for acknowledgment
+        int ackbytes = receive_msg(sockfd, ackBuf, BUFFLEN, servinfo); // Will timeout after 1 sec
+        
+        if (ackbytes > 0){
+            //If it didn't time out
+            printf("Raw ackbuf: %s\n", ackBuf);
+            printf("assure_arrival_of_packet: Received ack. Will verify it now. %u ?= %u\n", atoi(ackBuf), numPacket);
+             if (atoi(ackBuf) == numPacket){
+                printf("assure_arrival_of_packet: Packet %u has been verified\n", atoi(ackBuf));
+                break; // We succesffuly received the acknowledgement for the packet
+            }
+            else {
+                printf("assure_arrival_of_packet: Ack is not approved. %s\n", ackBuf);
+            }
+        }
+           
+    }
+    return sentbytes;
+}
+
 void send_file(int sockfd, FILE *src_file, struct addrinfo *servinfo){
     char filebuf[BUFFLEN];
+    
     memset(filebuf, 0, BUFFLEN);
-    int numbytes;
+    //TODO send checksum to compare
+    int readbytes;
     int totalsent = 0;
-    while ((numbytes = (fread(filebuf, 1, BUFFLEN,  src_file))) > 0){
-        int sendbytes = send_to_server(sockfd, filebuf, numbytes, servinfo);
+    unsigned int curPacket = 0; // AKA sequence number
+    while ((readbytes = (fread(filebuf, 1, BUFFLEN,  src_file))) > 0){
+        int sentbytes = assure_arrival_of_packet(sockfd, curPacket, filebuf, BUFFLEN, servinfo); // Won't exit until the packet has been assured to have arrived at server
+        printf("send_file: Sent packet %u\n", curPacket);
         memset(filebuf, 0, BUFFLEN);
-        totalsent += sendbytes;
+        totalsent += sentbytes;
+        curPacket++;
+        
         }
     send_transmission_done_packet(sockfd, servinfo);
-    printf("Sent a %i bytes\n", totalsent);
+    printf("Sent a %u bytes\n", totalsent);
     fclose(src_file);
 }
 

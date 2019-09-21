@@ -8,7 +8,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
-#define BUFFLEN 14000 //Temporary
+#define BUFFLEN 512 //Temporary
 struct addrinfo init_hints() {
     struct addrinfo hints;
     memset(&hints, 0, sizeof(hints));
@@ -40,7 +40,13 @@ void init_servinfo( struct addrinfo **servinfo, char *port) {
 int create_socket(struct addrinfo *p){
     int sockfd = socket(p -> ai_family, p->ai_socktype, p->ai_protocol);
     if (sockfd == -1)
-        perror("listener: socket");
+        perror("create_socket: socket");
+    /*struct timeval tv;
+    tv.tv_sec = 1; // Set timeout to be 1
+    if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO,&tv,sizeof(tv)) < 0) 
+        perror("Error");
+    */
+
     return sockfd;
 }
 
@@ -48,7 +54,7 @@ int bind_to_socket(int sockfd, struct addrinfo *p) {
     int bind_res = bind(sockfd, p->ai_addr, p->ai_addrlen);
     if (bind_res){
         close(sockfd);
-        perror("listener: bind");
+        perror("bind_to_socket: bind");
     }
     return bind_res;
 }
@@ -64,7 +70,7 @@ int socket_bind(struct addrinfo *servinfo) {
             break;
     }
     if (p == NULL) {
-        fprintf(stderr, "listener: failed to bind socket\n");
+        fprintf(stderr, "socket_bind: failed to bind socket");
         exit(1);
     }
     return new_sockfd;
@@ -76,7 +82,7 @@ int receive_msg(int sockfd, char buf[], size_t buflen,struct sockaddr_storage *c
     memset(buf, 0, buflen);
     int numbytes = recvfrom(sockfd, buf, buflen, 0,(struct sockaddr *)client_addr, &addr_len);
     if(numbytes == -1){
-        perror("recvfrom");
+        perror("receive_msg: recvfrom");
         exit(1);
     }
     buf[numbytes] = '\0';
@@ -87,7 +93,7 @@ int send_to_client(int sockfd, char *buf, size_t buflen,struct sockaddr_storage 
     socklen_t addr_len = sizeof client_addr;
     int numbytes = sendto(sockfd, buf, buflen, 0, (struct sockaddr *)&client_addr, addr_len);
     if(numbytes == -1){
-        perror("sendto");
+        perror("send_to_client: sendto");
         exit(1);
     }
     return numbytes;
@@ -105,7 +111,7 @@ void handle_ls_cmd(int sockfd, struct sockaddr_storage client_addr){
 
     if (fp == NULL)
     {
-        perror("popen() failed.");
+        perror("handle_ls_cmd: popen");
         exit(1);
     }
  
@@ -149,16 +155,43 @@ void handle_get_cmd(char buf[], int sockfd, struct sockaddr_storage client_addr)
     }
 }
 
+int acknowledge_packet(int sockfd,unsigned int curPacket,struct sockaddr_storage client_addr){
+    char curpacketStr[sizeof(curPacket) * 8+ 1];
+    sprintf(curpacketStr, "%u", curPacket);
+    printf("acknowledge_packet: Sending ack for packet %u\n", atoi(curpacketStr));
+    return send_to_client(sockfd, curpacketStr, BUFFLEN, client_addr);
+}
+
 void receive_file(int sockfd, FILE *dst_file , struct sockaddr_storage *client_addr){
     char filebuf[BUFFLEN]; 
-    int numbytes;
+    int recvBytes = 0;
+    int ackBytes = 0;
     int totalReceived = 0;
-    while ((numbytes = receive_msg(sockfd, filebuf, BUFFLEN, client_addr)) > 0){
-        fwrite(filebuf, numbytes, 1, dst_file);
-        totalReceived += numbytes;
+    unsigned int curPacket = 0; // AKA sequence number
+    char lastbuf[BUFFLEN];
+    memset(filebuf, 0, BUFFLEN);
+    strcpy(lastbuf, filebuf);
+    while ((recvBytes = receive_msg(sockfd, filebuf, BUFFLEN, client_addr)) > 0){
+        printf("receive_file curPacket: %u\n", curPacket);
+        ackBytes += acknowledge_packet(sockfd, curPacket, *client_addr);
+        printf("receive_file curPacket: %u\n", curPacket);
+        if (strcmp(lastbuf, filebuf) == 0) {
+            //This case happens when we send an ack but the client doesn't receive it so the client will resend the msg again
+
+            continue;
+        }
+
+        else {
+            printf("receive_file curPacket: %u\n", curPacket);
+            printf("receive_file: Received %u packet. Will proceed to write to the file\n", curPacket);
+            fwrite(filebuf, recvBytes, 1, dst_file);
+            //strncpy(lastbuf, filebuf, BUFFLEN);
+            totalReceived += recvBytes;
+            curPacket += 1;
+        }
         //Will exit when recives a packet with buffer length = 0, which is our transmission done packet (send_transmission_done_packet)
     }
-    printf("Total received %i bytes\n", totalReceived); // TODO delete this
+    printf("Total received %u bytes\n", totalReceived); // TODO delete this
     fclose(dst_file);
 }
 
