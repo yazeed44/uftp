@@ -185,9 +185,9 @@ void receive_file(int sockfd, FILE *dst_file , struct sockaddr_storage *client_a
             printf("receive_file curPacket: %u\n", curPacket);
             printf("receive_file: Received %u packet. Will proceed to write to the file\n", curPacket);
             fwrite(filebuf, recvBytes, 1, dst_file);
-            //strncpy(lastbuf, filebuf, BUFFLEN);
+            strncpy(lastbuf, filebuf, BUFFLEN);
             totalReceived += recvBytes;
-            curPacket += 1;
+            curPacket++;
         }
         //Will exit when recives a packet with buffer length = 0, which is our transmission done packet (send_transmission_done_packet)
     }

@@ -121,7 +121,7 @@ void send_file(int sockfd, FILE *src_file, struct addrinfo *servinfo){
     int totalsent = 0;
     unsigned int curPacket = 0; // AKA sequence number
     while ((readbytes = (fread(filebuf, 1, BUFFLEN,  src_file))) > 0){
-        int sentbytes = assure_arrival_of_packet(sockfd, curPacket, filebuf, BUFFLEN, servinfo); // Won't exit until the packet has been assured to have arrived at server
+        int sentbytes = assure_arrival_of_packet(sockfd, curPacket, filebuf, readbytes, servinfo); // Won't exit until the packet has been assured to have arrived at server
         printf("send_file: Sent packet %u\n", curPacket);
         memset(filebuf, 0, BUFFLEN);
         totalsent += sentbytes;
