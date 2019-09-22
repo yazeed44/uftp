@@ -8,7 +8,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
-#define BUFFLEN 512 //TODO look for optimal buffer length
+#define BUFFLEN 1024 //TODO look for optimal buffer length
 //TODO Test support for DNS argument
 void check_arguments(int argc){
     if (argc != 3) {
@@ -58,7 +58,7 @@ int send_to_server(int sockfd, char buf[], size_t buflen, struct addrinfo *servi
 
 int receive_msg(int sockfd, char buf[], size_t buflen,struct addrinfo *servinfo){
     memset(buf, 0, buflen);
-    unsigned int len;
+    int len = sizeof(servinfo);
     int numbytes = recvfrom(sockfd, buf, buflen, 0,servinfo -> ai_addr, &len);
     if(numbytes == -1){
         perror("receive_msg: recvfrom");
@@ -101,7 +101,7 @@ int assure_arrival_of_packet(int sockfd, unsigned int numPacket,char filebuf[], 
             printf("assure_arrival_of_packet: Received ack. Will verify it now. %u ?= %u\n", atoi(ackBuf), numPacket);
              if (atoi(ackBuf) == numPacket){
                 printf("assure_arrival_of_packet: Packet %u has been verified\n", atoi(ackBuf));
-                break; // We succesffuly received the acknowledgement for the packet
+                break; // We succesfully received the acknowledgement for the packet
             }
             else {
                 printf("assure_arrival_of_packet: Ack is not approved. %s\n", ackBuf);

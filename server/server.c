@@ -8,7 +8,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
-#define BUFFLEN 512 //Temporary
+#define BUFFLEN 1024 //Temporary
 struct addrinfo init_hints() {
     struct addrinfo hints;
     memset(&hints, 0, sizeof(hints));
@@ -159,7 +159,7 @@ int acknowledge_packet(int sockfd,unsigned int curPacket,struct sockaddr_storage
     char curpacketStr[sizeof(curPacket) * 8+ 1];
     sprintf(curpacketStr, "%u", curPacket);
     printf("acknowledge_packet: Sending ack for packet %u\n", atoi(curpacketStr));
-    return send_to_client(sockfd, curpacketStr, BUFFLEN, client_addr);
+    return send_to_client(sockfd, curpacketStr, strlen(curpacketStr), client_addr);
 }
 
 void receive_file(int sockfd, FILE *dst_file , struct sockaddr_storage *client_addr){
@@ -172,20 +172,18 @@ void receive_file(int sockfd, FILE *dst_file , struct sockaddr_storage *client_a
     memset(filebuf, 0, BUFFLEN);
     strcpy(lastbuf, filebuf);
     while ((recvBytes = receive_msg(sockfd, filebuf, BUFFLEN, client_addr)) > 0){
-        printf("receive_file curPacket: %u\n", curPacket);
         ackBytes += acknowledge_packet(sockfd, curPacket, *client_addr);
-        printf("receive_file curPacket: %u\n", curPacket);
-        if (strcmp(lastbuf, filebuf) == 0) {
-            //This case happens when we send an ack but the client doesn't receive it so the client will resend the msg again
+        if (lastbuf == filebuf) {
+            //This case happens when we send an ack but the client doesn't receive the ack so the client will resend the msg again
+            printf("The client resent packet #%d. Skipping\n", curPacket);
 
             continue;
         }
 
         else {
-            printf("receive_file curPacket: %u\n", curPacket);
             printf("receive_file: Received %u packet. Will proceed to write to the file\n", curPacket);
             fwrite(filebuf, recvBytes, 1, dst_file);
-            strncpy(lastbuf, filebuf, BUFFLEN);
+            memcpy(lastbuf, filebuf, BUFFLEN);
             totalReceived += recvBytes;
             curPacket++;
         }
