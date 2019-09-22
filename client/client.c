@@ -8,7 +8,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
-#include "../util.h"
+#define BUFFLEN 1024 //TODO look for optimal buffer length
 //TODO Test support for DNS argument
 void check_arguments(int argc){
     if (argc != 3) {
@@ -16,13 +16,36 @@ void check_arguments(int argc){
         exit(1);
     }
 }
-void init_servinfo( struct addrinfo **servinfo, char *argv[]) {
+struct addrinfo init_hints() {
+    struct addrinfo hints;
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_DGRAM;
+    return hints;
+}
+
+void init_servinfo( struct addrinfo **servinfo, char* argv[]) {
     struct addrinfo hints = init_hints();
     int rv;
     if (rv = (getaddrinfo(argv[1], argv[2], &hints, servinfo)) != 0){
         fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
         exit(1);
     }
+}
+
+int create_socket(struct addrinfo *servinfo) {
+    int sockfd = socket(servinfo->ai_family, servinfo->ai_socktype, servinfo->ai_protocol);
+    if (sockfd == -1) {
+            perror("create_socket: socket");
+            exit(1);
+    }
+    struct timeval tv;
+    tv.tv_sec = 1; // Set timeout to be 1 seconds
+    tv.tv_usec = 0;
+    if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO,&tv,sizeof(tv)) < 0) 
+        perror("create_socket: setsockopt");
+
+    return sockfd;
 }
 
 int send_to_server(int sockfd, char buf[], size_t buflen, struct addrinfo *servinfo){
@@ -60,6 +83,16 @@ int send_transmission_done_packet(int sockfd, struct addrinfo *servinfo){
     char buf[BUFFLEN];
     memset(buf, 0, strlen(buf));
     return send_to_server(sockfd, buf, strlen(buf), servinfo);
+}
+
+unsigned char checksum_of_file(FILE *src_file){
+    //Assumes that the file is open already
+    fseek(src_file, 0, SEEK_SET); // Set the file cursor to start
+    unsigned char checksum = 0;
+    while (!feof(src_file) && !ferror(src_file)) {
+        checksum ^= fgetc(src_file);
+    }
+    return checksum;
 }
 
 void send_checksum_packet(int sockfd, FILE*src_file, struct addrinfo *servinfo){
@@ -118,8 +151,17 @@ void send_file(int sockfd, FILE *src_file, struct addrinfo *servinfo){
     fclose(src_file);
 }
 
+char* get_filename(char cmd[]){
+    //Extract file name from command
+    char *filename = malloc(BUFFLEN);
+    strcpy(filename, cmd);
+    filename = strtok(filename, " ");
+    filename = strtok(NULL, " ");
+    return filename;
+}
+
 void handle_put_command(char cmd[], int sockfd, struct addrinfo *servinfo){
-    char *filename = extract_filename(cmd);
+    char *filename = get_filename(cmd);
     FILE *file_destination =  fopen(filename, "rb");
     if(file_destination == NULL)
     {
@@ -146,7 +188,7 @@ void receive_file(int sockfd, FILE *dst_file , struct addrinfo *servinfo){
 }
 
 void handle_get_command(char cmd[], int sockfd, struct addrinfo *servinfo){
-    char *filename = extract_filename(cmd);
+    char *filename = get_filename(cmd);
     FILE *file_destination =  fopen(filename, "wb");
     if(file_destination == NULL)
     {

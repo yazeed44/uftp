@@ -8,18 +8,16 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
-#include "../util.h"
-
-
-void init_servinfo( struct addrinfo **servinfo, char *port) {
-    struct addrinfo hints = init_hints();
+#define BUFFLEN 1024 //Temporary
+struct addrinfo init_hints() {
+    struct addrinfo hints;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_DGRAM;
     hints.ai_flags = AI_PASSIVE;
-    int rv;
-    if (rv = (getaddrinfo(NULL, port, &hints, servinfo)) != 0){
-        fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
-        exit(1);
-    }
+    return hints;
 }
+
 char* init_port(int argc, char* argv[]){
     if (argc != 2) {
         fprintf(stderr, "usage: ./server port\n");
@@ -28,6 +26,28 @@ char* init_port(int argc, char* argv[]){
     else {
         return argv[1];
     }
+}
+
+void init_servinfo( struct addrinfo **servinfo, char *port) {
+    struct addrinfo hints = init_hints();
+    int rv;
+    if (rv = (getaddrinfo(NULL, port, &hints, servinfo)) != 0){
+        fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
+        exit(1);
+    }
+}
+
+int create_socket(struct addrinfo *p){
+    int sockfd = socket(p -> ai_family, p->ai_socktype, p->ai_protocol);
+    if (sockfd == -1)
+        perror("create_socket: socket");
+    /*struct timeval tv;
+    tv.tv_sec = 1; // Set timeout to be 1
+    if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO,&tv,sizeof(tv)) < 0) 
+        perror("Error");
+    */
+
+    return sockfd;
 }
 
 int bind_to_socket(int sockfd, struct addrinfo *p) {
@@ -55,6 +75,7 @@ int socket_bind(struct addrinfo *servinfo) {
     }
     return new_sockfd;
 }
+
 
 int receive_msg(int sockfd, char buf[], size_t buflen,struct sockaddr_storage *client_addr){
     socklen_t addr_len = sizeof *client_addr;
@@ -172,6 +193,16 @@ void receive_file(int sockfd, FILE *dst_file , struct sockaddr_storage *client_a
     fclose(dst_file);
 }
 
+unsigned char checksum_of_file(FILE *src_file){
+    //Assumes that the file is open already
+    unsigned char checksum = 0;
+    fseek(src_file, 0, SEEK_SET); //Set the file's cursor to start
+    while (!feof(src_file) && !ferror(src_file)) {
+        checksum ^= fgetc(src_file);
+    }
+    return checksum;
+}
+
 void verify_file(int sockfd, char *filename, struct sockaddr_storage *client_addr){
     FILE *src_file = fopen(filename, "rb");
     unsigned char checksum = checksum_of_file(src_file);
@@ -200,6 +231,10 @@ void verify_file(int sockfd, char *filename, struct sockaddr_storage *client_add
                 break;
             }
     }
+
+        
+        
+
 }
 void handle_put_cmd(char buf[], int sockfd, struct sockaddr_storage *client_addr){ 
     char *filename = strtok(buf, " ");
