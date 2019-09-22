@@ -60,10 +60,6 @@ int receive_msg(int sockfd, char buf[], size_t buflen,struct addrinfo *servinfo)
     memset(buf, 0, buflen);
     int len = sizeof(servinfo);
     int numbytes = recvfrom(sockfd, buf, buflen, 0,servinfo -> ai_addr, &len);
-    if(numbytes == -1){
-        perror("receive_msg: recvfrom");
-        exit(1);
-    }
     buf[numbytes] = '\0';
     return numbytes;
 }
@@ -100,7 +96,7 @@ void send_checksum_packet(int sockfd, FILE*src_file, struct addrinfo *servinfo){
     printf("Raw checksum: %#x\n", checksum);
     char checksumPacket[sizeof(checksum) * 8 + 1];
     sprintf(checksumPacket, "%c", checksum);
-    send_to_server(sockfd, checksumPacket, strlen(checksumPacket), servinfo); // TODO need to ensure that the checksum packet arrives
+    //send_to_server(sockfd, checksumPacket, strlen(checksumPacket), servinfo); 
 }
 int assure_arrival_of_packet(int sockfd, unsigned int numPacket,char filebuf[], size_t buflen,struct addrinfo *servinfo){
     int sentbytes = 0;
@@ -146,7 +142,7 @@ void send_file(int sockfd, FILE *src_file, struct addrinfo *servinfo){
     printf("Sent a %u bytes\n", totalsent);
     send_transmission_done_packet(sockfd, servinfo);
     send_checksum_packet(sockfd, src_file, servinfo);
-    
+    print_response(sockfd, servinfo);
     fclose(src_file);
 }
 
@@ -185,20 +181,19 @@ void verify_file(int sockfd, char *filename, struct addrinfo *servinfo){
     sprintf(checksumPacket, "%c", checksum);
 
     char checksumbuf[BUFFLEN];
-    while (1){
-        int recvbytes = receive_msg(sockfd, checksumbuf, BUFFLEN, servinfo);
-        if (recvbytes > 0)
-            if (strcmp(checksumbuf, checksumPacket) == 0)
-            {
-                printf("Checksum of the server's file and received file has been compared, and they are equal!\n");
-                break;
-            }
-            else 
-            {
-                printf("Checksum of the server's file and received file has been compared, and they are not equal! Please delete and redownload the file.\n");
-                break;
-            }
+    int recvbytes = receive_msg(sockfd, checksumbuf, BUFFLEN, servinfo);
+    if (recvbytes > 0){
+        if (strcmp(checksumbuf, checksumPacket) == 0)
+            printf("Checksum of the server's file and received file has been compared, and they are equal!\n");
+        
+        else 
+            printf("Checksum of the server's file and received file has been compared, and they are not equal! Please delete and redownload the file.\n");
+        
     }
+    else 
+        //If the checksum packet hasn't arrived
+        printf("Checksum from server didn't arrive, and thus the program can't make any conclusions on whether the file has been received correctly\n");
+    
 }
 
 int acknowledge_packet(int sockfd,unsigned int curPacket,struct addrinfo *servinfo){

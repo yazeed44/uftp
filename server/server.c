@@ -85,10 +85,6 @@ int receive_msg(int sockfd, char buf[], size_t buflen,struct sockaddr_storage *c
     socklen_t addr_len = sizeof *client_addr;
     memset(buf, 0, buflen);
     int numbytes = recvfrom(sockfd, buf, buflen, 0,(struct sockaddr *)client_addr, &addr_len);
-    if(numbytes == -1){
-        perror("receive_msg: recvfrom");
-        exit(1);
-    }
     buf[numbytes] = '\0';
     return numbytes;
 }
@@ -132,7 +128,7 @@ void send_checksum_packet(int sockfd, FILE*src_file, struct sockaddr_storage *cl
     printf("Raw checksum: %#x\n", checksum);
     char checksumPacket[sizeof(checksum) * 8 + 1];
     sprintf(checksumPacket, "%c", checksum);
-    send_to_client(sockfd, checksumPacket, strlen(checksumPacket), *client_addr); //TODO assure that packet arrives
+    send_to_client(sockfd, checksumPacket, strlen(checksumPacket), *client_addr);
 }
 
 void set_timeout(int sockfd, int seconds){
@@ -140,7 +136,7 @@ void set_timeout(int sockfd, int seconds){
     tv.tv_sec = seconds; 
     tv.tv_usec = 0;
     if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO,&tv,sizeof(tv)) < 0) 
-        perror("create_socket: setsockopt");
+        perror("set_timeout: setsockopt");
 }
 int assure_arrival_of_packet(int sockfd, unsigned int numPacket,char filebuf[], size_t buflen,struct sockaddr_storage *client_addr){
     int sentbytes = 0;
@@ -188,7 +184,6 @@ void send_file(int sockfd, FILE *src_file, struct sockaddr_storage client_addr){
     printf("Sent a %u bytes\n", totalsent);
     send_transmission_done_packet(sockfd, client_addr);
     send_checksum_packet(sockfd, src_file, &client_addr);
-    //send_transmission_done_packet(sockfd, client_addr);
     fclose(src_file);
 }
 
@@ -266,23 +261,28 @@ void verify_file(int sockfd, char *filename, struct sockaddr_storage *client_add
     sprintf(checksumPacket, "%c", checksum);
 
     char checksumbuf[BUFFLEN];
-    while (1){
-        int recvbytes = receive_msg(sockfd, checksumbuf, BUFFLEN, client_addr);
-        if (recvbytes > 0)
-            if (strcmp(checksumbuf, checksumPacket) == 0)
-            {
-                char *msg = "Checksum of the client's file and received file has been compared, and they are equal!\n";
-                send_to_client(sockfd, msg, strlen(msg), *client_addr);
-                send_transmission_done_packet(sockfd, *client_addr);
-                break;
-            }
-            else 
-            {
-                char *msg = "Checksum of the client's file and received file has been compared, and they are not equal! Please delete and resend the file.\n";
-                send_to_client(sockfd, msg, strlen(msg), *client_addr);
-                send_transmission_done_packet(sockfd, *client_addr);
-                break;
-            }
+    set_timeout(sockfd, 1);
+    int recvbytes = receive_msg(sockfd, checksumbuf, BUFFLEN, client_addr); // Will timeout after 1 second
+    set_timeout(sockfd, 0);
+    if (recvbytes > 0){
+        if (strcmp(checksumbuf, checksumPacket) == 0)
+        {
+            char *msg = "Checksum of the client's file and received file has been compared, and they are equal!\n";
+            send_to_client(sockfd, msg, strlen(msg), *client_addr);
+            send_transmission_done_packet(sockfd, *client_addr);
+        }
+        else 
+        {
+            char *msg = "Checksum of the client's file and received file has been compared, and they are not equal! Please delete and resend the file.\n";
+            send_to_client(sockfd, msg, strlen(msg), *client_addr);
+            send_transmission_done_packet(sockfd, *client_addr);
+        }
+    }
+
+    else {
+        char *msg = "Checksum from the client didn't arrive, and thus the program can't make any conclusions on whether the file has been received correctly\n";
+        send_to_client(sockfd, msg, strlen(msg), *client_addr);
+        send_transmission_done_packet(sockfd, *client_addr);
     }
 }
 void handle_put_cmd(char buf[], int sockfd, struct sockaddr_storage *client_addr){ 
