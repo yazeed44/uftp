@@ -85,6 +85,23 @@ int send_transmission_done_packet(int sockfd, struct addrinfo *servinfo){
     return send_to_server(sockfd, buf, strlen(buf), servinfo);
 }
 
+unsigned char checksum_of_file(FILE *src_file){
+    //Assumes that the file is open already
+    fseek(src_file, 0, SEEK_SET); // Set the file cursor to start
+    unsigned char checksum = 0;
+    while (!feof(src_file) && !ferror(src_file)) {
+        checksum ^= fgetc(src_file);
+    }
+    return checksum;
+}
+
+void send_checksum_packet(int sockfd, FILE*src_file, struct addrinfo *servinfo){
+    unsigned char checksum = checksum_of_file(src_file);
+    printf("Raw checksum: %#x\n", checksum);
+    char checksumPacket[sizeof(checksum) * 8 + 1];
+    sprintf(checksumPacket, "%c", checksum);
+    send_to_server(sockfd, checksumPacket, strlen(checksumPacket), servinfo);
+}
 int assure_arrival_of_packet(int sockfd, unsigned int numPacket,char filebuf[], size_t buflen,struct addrinfo *servinfo){
     int sentbytes = 0;
     char ackBuf[BUFFLEN];
@@ -126,10 +143,11 @@ void send_file(int sockfd, FILE *src_file, struct addrinfo *servinfo){
         memset(filebuf, 0, BUFFLEN);
         totalsent += sentbytes;
         curPacket++;
-        
         }
-    send_transmission_done_packet(sockfd, servinfo);
     printf("Sent a %u bytes\n", totalsent);
+    send_transmission_done_packet(sockfd, servinfo);
+    send_checksum_packet(sockfd, src_file, servinfo);
+    
     fclose(src_file);
 }
 

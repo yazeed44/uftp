@@ -193,6 +193,49 @@ void receive_file(int sockfd, FILE *dst_file , struct sockaddr_storage *client_a
     fclose(dst_file);
 }
 
+unsigned char checksum_of_file(FILE *src_file){
+    //Assumes that the file is open already
+    unsigned char checksum = 0;
+    fseek(src_file, 0, SEEK_SET); //Set the file's cursor to start
+    while (!feof(src_file) && !ferror(src_file)) {
+        checksum ^= fgetc(src_file);
+    }
+    return checksum;
+}
+
+void verify_file(int sockfd, char *filename, struct sockaddr_storage *client_addr){
+    FILE *src_file = fopen(filename, "rb");
+    unsigned char checksum = checksum_of_file(src_file);
+    printf("Raw checksum: %#x\n", checksum);
+    fclose(src_file);
+
+    char checksumPacket[sizeof(checksum) * 8 + 1];
+    sprintf(checksumPacket, "%c", checksum);
+
+    char checksumbuf[BUFFLEN];
+    while (1){
+        int recvbytes = receive_msg(sockfd, checksumbuf, BUFFLEN, client_addr);
+        if (recvbytes > 0)
+            if (strcmp(checksumbuf, checksumPacket) == 0)
+            {
+                char *msg = "Checksum of the client's file and received file has been compared, and they are equal!\n";
+                send_to_client(sockfd, msg, strlen(msg), *client_addr);
+                send_transmission_done_packet(sockfd, *client_addr);
+                break;
+            }
+            else 
+            {
+                char *msg = "Checksum of the client's file and received file has been compared, and they are not equal! Please delete and resend the file.\n";
+                send_to_client(sockfd, msg, strlen(msg), *client_addr);
+                send_transmission_done_packet(sockfd, *client_addr);
+                break;
+            }
+    }
+
+        
+        
+
+}
 void handle_put_cmd(char buf[], int sockfd, struct sockaddr_storage *client_addr){ 
     char *filename = strtok(buf, " ");
     filename = strtok(NULL, " ");
@@ -207,9 +250,7 @@ void handle_put_cmd(char buf[], int sockfd, struct sockaddr_storage *client_addr
     else
     {
         receive_file(sockfd, file_destination, client_addr);
-        char *msg = "The file has been received. Although a verifying method has not been implemented yet (WIP) \n"; // TODO change this
-        send_to_client(sockfd, msg, strlen(msg), *client_addr);
-        send_transmission_done_packet(sockfd, *client_addr);
+        verify_file(sockfd, filename, client_addr);
     } 
 }
 
