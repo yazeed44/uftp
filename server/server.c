@@ -41,12 +41,6 @@ int create_socket(struct addrinfo *p){
     int sockfd = socket(p -> ai_family, p->ai_socktype, p->ai_protocol);
     if (sockfd == -1)
         perror("create_socket: socket");
-    /*struct timeval tv;
-    tv.tv_sec = 1; // Set timeout to be 1
-    if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO,&tv,sizeof(tv)) < 0) 
-        perror("Error");
-    */
-
     return sockfd;
 }
 
@@ -74,6 +68,16 @@ int socket_bind(struct addrinfo *servinfo) {
         exit(1);
     }
     return new_sockfd;
+}
+
+unsigned char checksum_of_file(FILE *src_file){
+    //Assumes that the file is open already
+    unsigned char checksum = 0;
+    fseek(src_file, 0, SEEK_SET); //Set the file's cursor to start
+    while (!feof(src_file) && !ferror(src_file)) {
+        checksum ^= fgetc(src_file);
+    }
+    return checksum;
 }
 
 
@@ -123,28 +127,85 @@ void handle_ls_cmd(int sockfd, struct sockaddr_storage client_addr){
     pclose(fp);
 }
 
+void send_checksum_packet(int sockfd, FILE*src_file, struct sockaddr_storage *client_addr){
+    unsigned char checksum = checksum_of_file(src_file);
+    printf("Raw checksum: %#x\n", checksum);
+    char checksumPacket[sizeof(checksum) * 8 + 1];
+    sprintf(checksumPacket, "%c", checksum);
+    send_to_client(sockfd, checksumPacket, strlen(checksumPacket), *client_addr); //TODO assure that packet arrives
+}
+
+void set_timeout(int sockfd, int seconds){
+    struct timeval tv;
+    tv.tv_sec = seconds; 
+    tv.tv_usec = 0;
+    if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO,&tv,sizeof(tv)) < 0) 
+        perror("create_socket: setsockopt");
+}
+int assure_arrival_of_packet(int sockfd, unsigned int numPacket,char filebuf[], size_t buflen,struct sockaddr_storage *client_addr){
+    int sentbytes = 0;
+    char ackBuf[BUFFLEN];
+    while (1) {
+        int curBytes = send_to_client(sockfd, filebuf, buflen, *client_addr); // Send the file chunk packet
+        sentbytes += curBytes;
+        printf("assure_arrival_of_packet: Sent %u bytes. Waiting for ack now\n", curBytes);
+        //Wait for acknowledgment
+        set_timeout(sockfd, 1); // Enable timeout
+        int ackbytes = receive_msg(sockfd, ackBuf, BUFFLEN, client_addr); // Will timeout after 1 sec
+        
+        if (ackbytes > 0){
+            //If it didn't time out
+            printf("Raw ackbuf: %s\n", ackBuf);
+            printf("assure_arrival_of_packet: Received ack. Will verify it now. %u ?= %u\n", atoi(ackBuf), numPacket);
+             if (atoi(ackBuf) == numPacket){
+                printf("assure_arrival_of_packet: Packet %u has been verified\n", atoi(ackBuf));
+                set_timeout(sockfd, 0); // Disable timeout
+                break; // We succesfully received the acknowledgement for the packet
+            }
+            else {
+                printf("assure_arrival_of_packet: Ack is not approved. %s\n", ackBuf);
+            }
+        }
+           
+    }
+    return sentbytes;
+}
+
 void send_file(int sockfd, FILE *src_file, struct sockaddr_storage client_addr){
     char filebuf[BUFFLEN];
-    memset(filebuf, 0, BUFFLEN);
-    int numbytes;
-    int totalsent = 0;
-    while ((numbytes = (fread(filebuf, 1, BUFFLEN,  src_file))) > 0){
-        int sendbytes = send_to_client(sockfd, filebuf, numbytes, client_addr);
-        printf("Sent %i bytes \n", sendbytes);
-        memset(filebuf, 0, BUFFLEN);
-        totalsent += sendbytes;
-        }
-    send_transmission_done_packet(sockfd, client_addr);
-    printf("Total bytes are %i bytes\n", totalsent);
     
+    memset(filebuf, 0, BUFFLEN);
+    int readbytes;
+    int totalsent = 0;
+    unsigned int curPacket = 0; // AKA sequence number
+    while ((readbytes = (fread(filebuf, 1, BUFFLEN,  src_file))) > 0){
+        int sentbytes = assure_arrival_of_packet(sockfd, curPacket, filebuf, readbytes, &client_addr); // Won't exit until the packet has been assured to have arrived at server
+        printf("send_file: Sent packet %u\n", curPacket);
+        memset(filebuf, 0, BUFFLEN);
+        totalsent += sentbytes;
+        curPacket++;
+        }
+    printf("Sent a %u bytes\n", totalsent);
+    send_transmission_done_packet(sockfd, client_addr);
+    send_checksum_packet(sockfd, src_file, &client_addr);
+    //send_transmission_done_packet(sockfd, client_addr);
     fclose(src_file);
 }
 
+int check_file_exists(const char * filename){
+    /* try to open file to read */
+    FILE *file;
+    if (file = fopen(filename, "r")){
+        fclose(file);
+        return 1;
+    }
+    return 0;
+}
 void handle_get_cmd(char buf[], int sockfd, struct sockaddr_storage client_addr) {
     char *filename = strtok(buf, " ");
     filename = strtok(NULL, " ");
     FILE* fp = fopen(filename, "r");
-    if (fp == NULL){
+    if (fp == NULL || !check_file_exists(filename)){
         char msg[] = "File open failed!\n";
         send_to_client(sockfd, msg, strlen(msg), client_addr);
         send_transmission_done_packet(sockfd, client_addr);
@@ -193,15 +254,7 @@ void receive_file(int sockfd, FILE *dst_file , struct sockaddr_storage *client_a
     fclose(dst_file);
 }
 
-unsigned char checksum_of_file(FILE *src_file){
-    //Assumes that the file is open already
-    unsigned char checksum = 0;
-    fseek(src_file, 0, SEEK_SET); //Set the file's cursor to start
-    while (!feof(src_file) && !ferror(src_file)) {
-        checksum ^= fgetc(src_file);
-    }
-    return checksum;
-}
+
 
 void verify_file(int sockfd, char *filename, struct sockaddr_storage *client_addr){
     FILE *src_file = fopen(filename, "rb");
@@ -231,10 +284,6 @@ void verify_file(int sockfd, char *filename, struct sockaddr_storage *client_add
                 break;
             }
     }
-
-        
-        
-
 }
 void handle_put_cmd(char buf[], int sockfd, struct sockaddr_storage *client_addr){ 
     char *filename = strtok(buf, " ");

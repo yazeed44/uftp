@@ -100,7 +100,7 @@ void send_checksum_packet(int sockfd, FILE*src_file, struct addrinfo *servinfo){
     printf("Raw checksum: %#x\n", checksum);
     char checksumPacket[sizeof(checksum) * 8 + 1];
     sprintf(checksumPacket, "%c", checksum);
-    send_to_server(sockfd, checksumPacket, strlen(checksumPacket), servinfo);
+    send_to_server(sockfd, checksumPacket, strlen(checksumPacket), servinfo); // TODO need to ensure that the checksum packet arrives
 }
 int assure_arrival_of_packet(int sockfd, unsigned int numPacket,char filebuf[], size_t buflen,struct addrinfo *servinfo){
     int sentbytes = 0;
@@ -133,7 +133,6 @@ void send_file(int sockfd, FILE *src_file, struct addrinfo *servinfo){
     char filebuf[BUFFLEN];
     
     memset(filebuf, 0, BUFFLEN);
-    //TODO send checksum to compare
     int readbytes;
     int totalsent = 0;
     unsigned int curPacket = 0; // AKA sequence number
@@ -173,20 +172,87 @@ void handle_put_command(char cmd[], int sockfd, struct addrinfo *servinfo){
         print_response(sockfd, servinfo);
     }
 }
+void verify_file(int sockfd, char *filename, struct addrinfo *servinfo){
+    FILE *src_file = fopen(filename, "rb");
+    if (src_file == NULL)
+        return;
+    
+    unsigned char checksum = checksum_of_file(src_file);
+    printf("Raw checksum: %#x\n", checksum);
+    fclose(src_file);
+
+    char checksumPacket[sizeof(checksum) * 8 + 1];
+    sprintf(checksumPacket, "%c", checksum);
+
+    char checksumbuf[BUFFLEN];
+    while (1){
+        int recvbytes = receive_msg(sockfd, checksumbuf, BUFFLEN, servinfo);
+        if (recvbytes > 0)
+            if (strcmp(checksumbuf, checksumPacket) == 0)
+            {
+                printf("Checksum of the server's file and received file has been compared, and they are equal!\n");
+                break;
+            }
+            else 
+            {
+                printf("Checksum of the server's file and received file has been compared, and they are not equal! Please delete and redownload the file.\n");
+                break;
+            }
+    }
+}
+
+int acknowledge_packet(int sockfd,unsigned int curPacket,struct addrinfo *servinfo){
+    char curpacketStr[sizeof(curPacket) * 8+ 1];
+    sprintf(curpacketStr, "%u", curPacket);
+    printf("acknowledge_packet: Sending ack for packet %u\n", atoi(curpacketStr));
+    return send_to_server(sockfd, curpacketStr, strlen(curpacketStr), servinfo);
+}
 
 void receive_file(int sockfd, FILE *dst_file , struct addrinfo *servinfo){
     char filebuf[BUFFLEN]; 
-    int numbytes;
+    int recvBytes = 0;
+    int ackBytes = 0;
     int totalReceived = 0;
-    while ((numbytes = receive_msg(sockfd, filebuf, BUFFLEN, servinfo)) > 0){
-        fwrite(filebuf, numbytes, 1, dst_file);
-        totalReceived += numbytes;
+    unsigned int curPacket = 0; // AKA sequence number
+    char lastbuf[BUFFLEN];
+    memset(filebuf, 0, BUFFLEN);
+    strcpy(lastbuf, filebuf);
+    while ((recvBytes = receive_msg(sockfd, filebuf, BUFFLEN, servinfo)) > 0){
+        ackBytes += acknowledge_packet(sockfd, curPacket, servinfo);
+        if (lastbuf == filebuf) {
+            //This case happens when we send an ack but the client doesn't receive the ack so the client will resend the msg again
+            printf("The client resent packet #%d. Skipping\n", curPacket);
+
+            continue;
+        }
+
+        else {
+            printf("receive_file: Received %u packet. Will proceed to write to the file\n", curPacket);
+            fwrite(filebuf, recvBytes, 1, dst_file);
+            memcpy(lastbuf, filebuf, BUFFLEN);
+            totalReceived += recvBytes;
+            curPacket++;
+        }
         //Will exit when recives a packet with buffer length = 0, which is our transmission done packet (send_transmission_done_packet)
     }
-    printf("Total received %i bytes\n", totalReceived); // TODO delete this
+    printf("Total received %u bytes\n", totalReceived); // TODO delete this
     fclose(dst_file);
 }
 
+void delete_if_file_does_not_exist(int sockfd, char *filename, struct addrinfo *servinfo){
+    //The server will not send a message to the client.c that the file does not exist
+    //Instead it writes it to filename buffer
+    //In this function we will check if the file buffer matches those of who do not exist on the server
+    FILE *src_file = fopen(filename, "r");
+    char filebuf[BUFFLEN];
+    fread(filebuf, BUFFLEN, 1, src_file);
+    fclose(src_file);
+    if (strcmp("File open failed!\n", filebuf) == 0){
+        printf("%s does not exist on server\n", filename);
+        remove(filename);
+    }
+    
+}
 void handle_get_command(char cmd[], int sockfd, struct addrinfo *servinfo){
     char *filename = get_filename(cmd);
     FILE *file_destination =  fopen(filename, "wb");
@@ -198,6 +264,8 @@ void handle_get_command(char cmd[], int sockfd, struct addrinfo *servinfo){
     else {
         send_to_server(sockfd, cmd, strlen(cmd), servinfo);
         receive_file(sockfd, file_destination, servinfo);
+        delete_if_file_does_not_exist(sockfd, filename, servinfo);
+        verify_file(sockfd, filename, servinfo);
     }  
 }
 int send_cmd(int sockfd, struct addrinfo *servinfo) {
