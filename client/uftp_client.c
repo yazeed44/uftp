@@ -95,12 +95,10 @@ unsigned char checksum_of_file(FILE *src_file){
 
 void send_checksum_packet(int sockfd, FILE*src_file, struct addrinfo *servinfo){
     unsigned char checksum = checksum_of_file(src_file);
-    printf("Raw checksum: %#x\n", checksum); // TEMP
     char checksumPacket[sizeof(checksum) * 8 + 1];
     memset(checksumPacket, 0, sizeof(checksum) * 8 + 1);
     sprintf(checksumPacket, "%c", checksum);
     send_to_server(sockfd, checksumPacket, strlen(checksumPacket), servinfo); 
-    printf("Sent checksum packet\n"); // TEMP
 }
 int assure_arrival_of_packet(int sockfd, unsigned int numPacket,char filebuf[], size_t buflen,struct addrinfo *servinfo){
     int sentbytes = 0;
@@ -108,23 +106,14 @@ int assure_arrival_of_packet(int sockfd, unsigned int numPacket,char filebuf[], 
     while (1) {
         int curBytes = send_to_server(sockfd, filebuf, buflen, servinfo); // Send the file chunk packet
         sentbytes += curBytes;
-        printf("assure_arrival_of_packet: Sent %u bytes. Waiting for ack now\n", curBytes);
         //Wait for acknowledgment
         set_timeout(sockfd, 1,0);
         int ackbytes = receive_msg(sockfd, ackBuf, BUFFLEN, servinfo); // Will timeout after 1 sec
-        
         if (ackbytes > 0){
             //If it didn't time out
-            printf("Raw ackbuf: %s\n", ackBuf);
-            printf("assure_arrival_of_packet: Received ack. Will verify it now. %u ?= %u\n", atoi(ackBuf), numPacket);
              if (atoi(ackBuf) == numPacket){
-                printf("assure_arrival_of_packet: Packet %u has been verified\n", atoi(ackBuf));
                 set_timeout(sockfd, 0, 0);
                 break; // We succesfully received the acknowledgement for the packet
-            }
-            else {
-                printf("assure_arrival_of_packet: Ack is not approved. %s\n", ackBuf);
-                exit(1); //TEMP
             }
         }
            
@@ -139,14 +128,13 @@ void send_file(int sockfd, FILE *src_file, struct addrinfo *servinfo){
     int readbytes;
     int totalsent = 0;
     unsigned int curPacket = 0; // AKA sequence number
+    printf("Sending file. Please wait\n");
     while ((readbytes = (fread(filebuf, 1, BUFFLEN,  src_file))) > 0){
         int sentbytes = assure_arrival_of_packet(sockfd, curPacket, filebuf, readbytes, servinfo); // Won't exit until the packet has been assured to have arrived at server
-        printf("send_file: Sent packet %u\n", curPacket); // TEMP
         memset(filebuf, 0, BUFFLEN);
         totalsent += sentbytes;
         curPacket++;
         }
-    printf("Sent a %u bytes\n", totalsent); // TEMP
     send_transmission_done_packet(sockfd, servinfo);
     send_checksum_packet(sockfd, src_file, servinfo);
     fclose(src_file);
@@ -180,7 +168,6 @@ void verify_file(int sockfd, char *filename, struct addrinfo *servinfo){
         return;
     
     unsigned char checksum = checksum_of_file(src_file);
-    printf("Raw checksum: %#x\n", checksum);
     fclose(src_file);
 
     char checksumPacket[sizeof(checksum) * 8 + 1];
@@ -205,7 +192,6 @@ void verify_file(int sockfd, char *filename, struct addrinfo *servinfo){
 int acknowledge_packet(int sockfd,unsigned int curPacket,struct addrinfo *servinfo){
     char curpacketStr[sizeof(curPacket) * 8+ 1];
     sprintf(curpacketStr, "%u", curPacket);
-    printf("acknowledge_packet: Sending ack for packet %u\n", atoi(curpacketStr));
     return send_to_server(sockfd, curpacketStr, strlen(curpacketStr), servinfo);
 }
 
@@ -217,17 +203,15 @@ void receive_file(int sockfd, FILE *dst_file , struct addrinfo *servinfo){
     int totalReceived = 0;
     unsigned int curPacket = 0; // AKA sequence number
     char lastbuf[BUFFLEN];
+    printf("Downloading file. Please wait\n");
     while ((recvBytes = receive_msg(sockfd, filebuf, BUFFLEN, servinfo)) > 0){
         ackBytes += acknowledge_packet(sockfd, curPacket, servinfo);
         if (lastbuf == filebuf) {
             //This case happens when we send an ack but the client doesn't receive the ack so the client will resend the msg again
-            printf("The client resent packet #%d. Skipping\n", curPacket);
-
             continue;
         }
 
         else {
-            printf("receive_file: Received %u packet. Will proceed to write to the file\n", curPacket);
             fwrite(filebuf, recvBytes, 1, dst_file);
             memcpy(lastbuf, filebuf, BUFFLEN);
             totalReceived += recvBytes;
@@ -235,7 +219,6 @@ void receive_file(int sockfd, FILE *dst_file , struct addrinfo *servinfo){
         }
         //Will exit when recives a packet with buffer length = 0, which is our transmission done packet (send_transmission_done_packet)
     }
-    printf("Total received %u bytes\n", totalReceived); // TODO delete this
     fclose(dst_file);
 }
 
